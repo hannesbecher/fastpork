@@ -1,0 +1,16 @@
+name: fastpork
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - numpy
+  - numba>=0.55.0
+  - rich
+  - scipy
+  - h5py
+  - pytest
+  - pyyaml
+  - jinja2
+  - pip
+  - pip:
+    - hiyapyco

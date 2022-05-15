@@ -1,0 +1,14 @@
+__pycache__
+**/__pycache__
+.pytest_cache
+.cache
+*~
+*.bak
+*.h5
+*.hdf5
+*.egg-info
+*.aux
+*.log
+*.npy
+nohup*.out
+build
