@@ -16,15 +16,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from numba import njit, uint8, uint32, uint64, int64, boolean, prange
 
-from ..mathutils import print_histogram, print_histogram_tail
-from ..srhash import get_npages
-from ..hashio import save_hash
-from ..parameters import get_valueset_parameters, parse_parameters
-from ..builders import build_from_fastq, build_from_fasta, build_from_fastq_filter
-from ..builders_subtables import parallel_build_from_fastq, parallel_build_from_fasta
-from ..builders_subtables_filter import parallel_build_from_fastq_filter
-from ..filter_b3c import build_filter
-from ..lowlevel.debug import define_debugfunctions
+from .mathutils import print_histogram, print_histogram_tail
+from .srhash import get_npages
+from .hashio import save_hash
+from .parameters import get_valueset_parameters, parse_parameters
+from .builders import build_from_fastq, build_from_fasta, build_from_fastq_filter
+from .builders_subtables import parallel_build_from_fastq, parallel_build_from_fasta
+from .builders_subtables_filter import parallel_build_from_fastq_filter
+from .filter_b3c import build_filter
+from .lowlevel.debug import define_debugfunctions
 debugprint, timestamp = define_debugfunctions(debug=True, times=True)
 
 
