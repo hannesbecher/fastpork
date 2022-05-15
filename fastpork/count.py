@@ -54,7 +54,7 @@ def build_new_index(args):
         if hashtype.startswith("s"):
             hashtype = hashtype[1:]  # make it a non-subtable hash type
 
-    hashmodule = import_module("..hash_" + hashtype, __package__)
+    hashmodule = import_module(".hash_" + hashtype, __package__)
     print(f"# Use hash type {hashtype}")
     build_hash = hashmodule.build_hash
     universe = int(4**k)
