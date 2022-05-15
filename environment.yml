@@ -3,8 +3,9 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.9
-  - numpy
+  - numpy<=1.21
   - numba>=0.55.0
+  - pigz
   - rich
   - scipy
   - h5py
