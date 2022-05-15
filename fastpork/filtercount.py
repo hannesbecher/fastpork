@@ -75,7 +75,7 @@ def build_new_index(args):
         args.filter = args.filtersize1 = None
     if args.filtersize2 is not None and args.filtersize2 <= 0.0:
         args.filtersize2 = None
-    if args.filtersize3 is not None and args.filtersize <= 0.0:
+    if args.filtersize3 is not None and args.filtersize3 <= 0.0:
         args.filtersize3 = None
     if args.filter is not None:
         f1 = build_filter(k, universe, args.filtersize1, max(subtables, 1), hashfuncs)
