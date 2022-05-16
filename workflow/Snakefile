@@ -1,0 +1,405 @@
+# Snakemake workflow
+# Project main folder: ???
+# conda environment: ossabaw
+
+import os
+from collections import Counter
+import pandas as pd
+
+
+# Ossabaw pigs
+ossabaw = pd.read_csv("config/ossabaw.tsv", dtype=str, comment="#", sep='\t').set_index(["sample", "unit"], drop=False)
+ossabaw.index = ossabaw.index.set_levels([i.astype(str) for i in ossabaw.index.levels])  # enforce str in index
+
+# Goettingen minipgs
+minipig = pd.read_csv("config/minipig.tsv", dtype=str, comment="#", sep='\t').set_index(["sample", "unit"], drop=False)
+minipig.index = minipig.index.set_levels([i.astype(str) for i in minipig.index.levels])  # enforce str in index
+#MINIPIG_ACCESSIONS = [
+#    "ERR2744277", "ERR2744278", "ERR2744279", "ERR2744280", "ERR2744281",
+#    "ERR2744282", "ERR2744283", "ERR2744284", "ERR2744285", "ERR2744286",
+#  # "ERR3890832", "ERR3890833", "ERR3890834", "ERR3890835", "ERR3890836",
+#  # "ERR3890837", "ERR3890838", "ERR3890839", "ERR3890840", "ERR3890841"
+#  # "ERX3901068", "ERX3901069", "ERX3901070", "ERX3901071", "ERX3901072",
+#  # "ERX3901073", "ERX3901074", "ERX3901075", "ERX3901076", "ERX3901077"
+#    ]
+
+# All pigs
+units = pd.read_csv("config/allunits.tsv", dtype=str, comment="#", sep='\t').set_index(["sample", "unit"], drop=False)
+units.index = units.index.set_levels([i.astype(str) for i in units.index.levels])  # enforce str in index
+
+GENOME = "resources/Sscrofa11.1_genomic.fna.gz"
+OSSABAWPIGS = sorted(set(ossabaw["sample"].tolist()))
+FOSSABAWPIGS = "Valentine Anarietta Valencia Kangaroo".split()
+MINIPIGS = sorted(set(minipig["sample"].tolist()))
+FMINIPIGS = sorted(set(minipig["sample"].tolist()))
+ALLPIGS = OSSABAWPIGS + MINIPIGS
+FPIGS = FOSSABAWPIGS + FMINIPIGS
+GENDERS = ["female", "all"]
+
+KMER_SIZES_INDEX = [27]
+MY_K = [27]
+MY_M = [5, 12]
+MY_Ts = [3, 4]  # number of pigs that must have a k-mer
+
+# the famous 'all' rule
+rule all:
+    input:
+        GENOME,
+        expand("resources/jak-stat3-{k}-counts.h5", k=KMER_SIZES_INDEX),
+        expand("resources/jak-stat3-{k}-unique.h5", k=KMER_SIZES_INDEX),
+        expand("resources/Sscrofa11.1-{k}-counts.h5", k=KMER_SIZES_INDEX),
+        expand("resources/{pig}_files_{num}.txt", pig=ALLPIGS, num=[1,2]),
+        #expand('results/{pig}-{k}-graft.{num}.fq', pig=ALLPIGS, k=MY_K, num=[1,2]),
+        expand('results/extracted-{race}-{k}-counts.h5', race=['ossabaw', 'minipig'], k=MY_K),
+        #expand('results/diff-{k}.txt', k=MY_K),
+        expand('counts/{pig}-{k}.h5', pig=ALLPIGS, k=MY_K),
+        #expand('counts/{pig}-{k}.threshold', pig=ALLPIGS, k=MY_K),
+        #expand("results/annotation-{k}.vcf", k=MY_K),
+        #expand("results/genomewide-{k}-{gender}-{T}.zarr", k=MY_K, gender=GENDERS, T=MY_Ts),
+        #expand('results/tables-{k}-{gender}-{T}/{race}-{gene_or_coding}-{var_or_loss}.tsv',
+        #    k=MY_K, gender=GENDERS, T=MY_Ts, race=['ossabaw', 'minipig'],
+        #    gene_or_coding=['gene', 'coding', 'exon'], var_or_loss=['variants', 'losses'])
+        expand('results/genelists-{k}/list-{gene_or_coding}-{gender}-{T}.txt',
+            k=MY_K, gender=GENDERS, T=MY_Ts,
+            gene_or_coding=['gene', 'coding', 'exon']),
+        expand('results/consensus-{k}-{M}.txt', k=MY_K, M=MY_M),
+
+
+
+
+rule make_filelists:
+    output:
+        list1="resources/{pig, (?!ci_).+}_files_1.txt",
+        list2="resources/{pig, (?!ci_).+}_files_2.txt",
+    params:
+        illumina_only=True,
+    run:
+        with open(output.list1, 'wt') as writer:
+            for f in units.loc[wildcards.pig][["fq1"]].stack():
+                if params.illumina_only and '10X_linkedReads' in f: continue
+                writer.write(f"{os.path.abspath(f)}\n")
+        with open(output.list2, 'wt') as writer:
+            for f in units.loc[wildcards.pig][["fq2"]].stack():
+                if params.illumina_only and '10X_linkedReads' in f: continue
+                writer.write(f"{os.path.abspath(f)}\n")
+
+
+rule count_kmers_in_genes:
+    input:
+        rna='resources/jak-stat3-rna.fna',
+        dna='resources/jak-stat3-dna.fna',
+    output:
+        index='resources/jak-stat3-{k}-counts.h5',
+    log:
+        'logs/jak-stat3-{k}-counts.log'
+    params:
+        size=1000000,
+        bucketsize=4,
+        subtables=1,
+    threads: 2
+    shell:
+        'fastpark count --fasta {input.dna} -k {wildcards.k} -n {params.size} -v count 2 --pagesize {params.bucketsize} --fill 1.0  --subtables {params.subtables} -o {output} > {log}'
+
+
+rule count_kmers_in_reference_genome:
+    input:
+        genome=GENOME,
+    output:
+        counts='resources/Sscrofa11.1-{k}-counts.h5',
+    log:
+        'logs/Sscrofa11.1-{k}-counts.log'
+    params:
+        size=3_000_000_000,
+        bucketsize=4,
+        subtables=9,
+    threads: 10
+    shell:
+        'fastpark count --fasta <(pigz -cd -p2 {input}) -k {wildcards.k} -v count 16 -n {params.size} -p {params.bucketsize} --fill 1.0 --subtables {params.subtables} -o {output.counts} > {log}'
+
+
+
+def get_toreadboth(wildcards, input):
+    if wildcards.pig in MINIPIGS:
+        return f'`cat {input.list1} {input.list2}`'
+    return f'<(pigz -cd -p2 `cat {input.list1} {input.list2}`)'
+
+
+rule count_kmers_in_whole_genome_sample:
+    input:
+        list1='resources/{pig}_files_1.txt',
+        list2='resources/{pig}_files_2.txt',
+    output:
+        counts='counts/{pig}-{k}.h5',
+    log:
+        'logs/{pig}-{k}-counts.log'
+    params:
+        size=lambda wc: 4_400_000_000 if wc.pig not in MINIPIGS else 3_300_000_000,
+        maxcnt=512,
+        bucketsize=3,
+        subtables=19,
+        toreadboth=get_toreadboth,
+        filter1=21.0,
+        filter2=lambda wc: 8.0 if wc.pig not in MINIPIGS else 0.0,
+        maxwalk=2000,
+    threads: 20
+    shell:
+        'fastpark filtercount --filter {params.toreadboth} -q {params.toreadboth} '\
+        '-k {wildcards.k} --filtersize1 {params.filter1} --filtersize2 {params.filter2} '\
+        '-v count {params.maxcnt} -n {params.size} -p {params.bucketsize} '\
+        '--maxwalk {params.maxwalk} --fill 1.0 --subtables {params.subtables} '\
+        '-o {output.counts} > {log}'
+
+
+rule find_solid_threshold:
+    # Determine the "solid k-mer" count threshold from the k-mer histogram of a sample {pig}
+    input:
+        counts='counts/{pig}-{k}.h5',
+    output:
+        threshold="counts/{pig}-{k}.threshold"
+    params:
+        countlog='logs/{pig}-{k}-counts.log',
+        start=lambda wc: 2 if wc.pig in MINIPIGS else 3,
+    shell:
+        'python scripts/find_threshold.py --start {params.start} {params.countlog} > {output}'
+
+
+rule filter_unique:
+    input:
+        initial='resources/jak-stat3-{k}-counts.h5',
+        genomic='resources/Sscrofa11.1-{k}-counts.h5',
+    output:
+        unique='resources/jak-stat3-{k}-unique.h5',
+    log:
+        'logs/jak-stat3-{k}-unique.log'
+    threads: 4
+    shell:
+        'python scripts/pick_kmers.py {input.initial} {input.genomic} {output}'
+
+
+
+def get_toread1(wildcards, input):
+    if wildcards.pig in MINIPIGS:
+        return f'`cat {input.list1}`'
+    return f'<(pigz -cd -p2 `cat {input.list1}`)'
+
+def get_toread2(wildcards, input):
+    if wildcards.pig in MINIPIGS:
+        return f'`cat {input.list2}`'
+    return f'<(pigz -cd -p2 `cat {input.list2}`)'
+
+
+rule extract_genes:
+    input:
+        index='resources/jak-stat3-{k}-unique.h5',
+        list1='resources/{pig}_files_1.txt',
+        list2='resources/{pig}_files_2.txt',
+    output:
+        graft1='results/{pig}-{k}-graft.1.fq',
+        graft2='results/{pig}-{k}-graft.2.fq',
+    log:
+        'logs/{pig}-{k}-graft.log'
+    threads: 8
+    params:
+        toread1=get_toread1,
+        toread2=get_toread2,
+        bufsizeMB=10.0,
+    shell:
+        'xengsort classify --filter -q {params.toread1} -p {params.toread2} --index {input.index} -T {threads} -C {params.bufsizeMB} -o results/{wildcards.pig}-{wildcards.k} > {log}'
+
+
+
+def input_count_kmers_in_extracted_genes(wildcards):
+    race = wildcards.race
+    piglist = OSSABAWPIGS if race == "ossabaw" else MINIPIGS if race == "minipig" else ["ERROR"]
+    return expand('results/{pig}-{{k}}-graft.{num}.fq', pig=piglist, num=[1,2])
+
+rule count_kmers_in_extracted_genes:
+    input:
+        input_count_kmers_in_extracted_genes
+    output:
+        counts='results/extracted-{race}-{k}-counts.h5',
+    log:
+        'logs/extracted-{race}-{k}-counts.log'
+    params:
+        size=50_000_000,
+        bucketsize=4,
+        subtables=9,
+    threads: 10
+    shell:
+        'fastpark count -q {input} -k {wildcards.k} -v count 512 -n {params.size} -p {params.bucketsize} --fill 1.0 --subtables {params.subtables} -o {output.counts} > {log}'
+
+
+rule compute_gains_losses:
+    input:
+        ossabaw='results/extracted-ossabaw-{k}-counts.h5',
+        minipig='results/extracted-minipig-{k}-counts.h5',
+        bait='resources/jak-stat3-{k}-unique.h5',
+        genomic='resources/Sscrofa11.1-27-counts.h5',
+    output:
+        'results/gains_losses-{k}.txt',
+    shell:
+        """
+        python scripts/gainloss.py \
+        -o {input.ossabaw} -m {input.minipig} -b {input.bait} -g {input.genomic} \
+        | grep -v '^#' > {output}
+        """
+
+rule call_variants:
+    input:
+        'results/gains_losses-{k}.txt',
+    output:
+        'results/variants-{k}.vcf'
+    shell:
+        'python scripts/call_variants.py < {input} > {output}'
+
+
+
+#### VEP
+# cache is at: http://ftp.ensembl.org/pub/release-105/variation/indexed_vep_cache/
+# cache file: sus_scrofa_refseq_vep_105_Sscrofa11.1.tar.gz 
+
+rule get_vep_cache:
+    output:
+        directory("resources/vep/cache")
+    params:
+        species="sus_scrofa_refseq",
+        release="105",
+        build="Sscrofa11.1",
+    log:
+        "logs/vepcache.log"
+    cache: True  # save space and time with between workflow caching (see docs)
+    wrapper:
+        "v1.0.0/bio/vep/cache"
+
+
+rule download_vep_plugins:
+    output:
+        directory("resources/vep/plugins")
+    params:
+        release=105
+    wrapper:
+        "v1.0.0/bio/vep/plugins"
+
+
+rule annotate_variants:
+    input:
+        calls="results/variants-{k}.vcf",  # .vcf, .vcf.gz or .bcf
+        cache="resources/vep/cache",  # can be omitted if fasta and gff are specified
+        plugins="resources/vep/plugins",
+        # optionally add reference genome fasta
+        # fasta="genome.fasta",
+        # fai="genome.fasta.fai", # fasta index
+        # gff="annotation.gff",
+        # csi="annotation.gff.csi", # tabix index
+        # add mandatory aux-files required by some plugins if not present in the VEP plugin directory specified above.
+        # aux files must be defined as following: "<plugin> = /path/to/file" where plugin must be in lowercase
+        # revel = path/to/revel_scores.tsv.gz
+    output:
+        calls="results/annotation-{k}.vcf",  # .vcf, .vcf.gz or .bcf
+        stats="results/annotation-{k}.html",
+    #params:
+    #    # Pass a list of plugins to use, see https://www.ensembl.org/info/docs/tools/vep/script/vep_plugins.html
+    #    # Plugin args can be added as well, e.g. via an entry "MyPlugin,1,FOO", see docs.
+    #    #plugins=["LoFtool"],
+    #    #extra="--everything",  # optional: extra arguments
+    log:
+        "logs/annotation-{k}.log",
+    threads: 4
+    wrapper:
+        "v1.0.0/bio/vep/annotate"
+
+
+### Aggregate WGS k-mer counts of the two pig races
+
+def aggregate_counts_input_1(wc):
+    if wc.gender == "female":
+        return expand('counts/{pig}-{{k}}.h5', pig=FOSSABAWPIGS)
+    return expand('counts/{pig}-{{k}}.h5', pig=OSSABAWPIGS)
+def aggregate_counts_input_2(wc):
+    if wc.gender == "female":
+        return expand('counts/{pig}-{{k}}.h5', pig=FMINIPIGS)
+    return expand('counts/{pig}-{{k}}.h5', pig=MINIPIGS)
+
+rule aggregate_counts:
+    output:
+        aggregated='results/ossabaw-vs-minipig-{k}-{gender}.h5',
+    input:
+        first=aggregate_counts_input_1,
+        second=aggregate_counts_input_2,
+        thresholds=expand('counts/{pig}-{{k}}.threshold', pig=ALLPIGS),
+    log:
+        "logs/aggregate-{k}-{gender}.log"
+    benchmark:
+        "logs/aggregate-{k}-{gender}.time"
+    shell:
+        "python scripts/aggregate_two_species.py --first {input.first} --second {input.second}  -o {output.aggregated} > {log}"
+
+
+rule genomewide_analysis:
+    output:
+        zarr=directory("results/genomewide-{k}-{gender}-{T}.zarr"),
+    input:
+        aggregated='results/ossabaw-vs-minipig-{k}-{gender}.h5',
+        genomic='resources/Sscrofa11.1-{k}-counts.h5',
+        fasta='resources/Sscrofa11.1_genomic.fna.gz',
+    params:
+        TOssabaw=lambda wc: int(wc.T),
+        TMinipig=lambda wc: int(wc.T),
+    log:
+        "logs/genomewide_analysis-{k}-{gender}-{T}.log"
+    benchmark:
+        "logs/genomewide_analysis-{k}-{gender}-{T}.time"
+    shell:
+        "python scripts/genomewide_analysis.py "\
+        "--aggregated {input.aggregated} "\
+        "--genomic {input.genomic} "\
+        "--fasta <(zcat {input.fasta}) "\
+        "--TOssabaw {params.TOssabaw} --TMinipig {params.TMinipig} "
+        "--out {output.zarr} > {log}"
+
+
+rule create_gene_table:
+    output:
+        'results/tables-{k}-{gender}-{T}/{race}-{gene_or_coding}-{var_or_loss}.tsv'
+    input:
+        zarr="results/genomewide-{k}-{gender}-{T}.zarr",
+        regionfile="resources/{gene_or_coding}-intervals.txt",
+    params:
+        sortby=lambda wc: "-s variants" if wc.var_or_loss == "variants" else "",
+        swap=lambda wc: "--swap-pigs" if wc.race == "minipig" else "",
+        regionpar=lambda wc, input: f"-f {input.regionfile}" if wc.gene_or_coding != "exon" else f"-r all --filter {input.regionfile}"
+    shell:
+        "python scripts/create_gene_table.py "\
+        "-g {input.zarr} -k {wildcards.k} "\
+        "{params.regionpar} "\
+        "{params.sortby} {params.swap} "\
+        "> {output}"
+
+
+rule create_genelists:
+    output:
+        'results/genelists-{k}/list-{gene_or_coding}-{gender}-{T}.txt'
+    input:
+        ossabaw='results/tables-{k}-{gender}-{T}/ossabaw-{gene_or_coding}-losses.tsv',
+        minipig='results/tables-{k}-{gender}-{T}/minipig-{gene_or_coding}-losses.tsv',
+    shell:
+        "python scripts/create_genelist.py "\
+        "{input.ossabaw} {input.minipig} > {output}"
+
+
+rule create_consensus_list:
+    output:
+        'results/consensus-{k}-{M}.txt'
+    input:
+        expand('results/genelists-{{k}}/list-{gene_or_coding}-{gender}-{T}.txt',
+            gender=GENDERS, T=MY_Ts, gene_or_coding=['gene', 'coding', 'exon'])
+    run:
+        M = int(wildcards.M)
+        C = Counter()
+        for iname in input:
+            with open(iname, "rt") as fi:
+                C.update(line.strip() for line in fi.readlines())
+        with open(output[0], "wt") as fo:
+            for k, v in C.items():
+                if v < M: continue
+                print(k, file=fo)

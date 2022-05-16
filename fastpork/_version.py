@@ -1,4 +1,4 @@
-VERSION = "0.11.0"
+VERSION = "1.0.0"
 __version__ = VERSION
 
-DESCRIPTION = "The fastcash library implements fast (parallel) Cuckoo hashing, together with several applications."
+DESCRIPTION = "The fastpork application is a fast parallel k-mer counter."
